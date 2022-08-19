@@ -46,47 +46,9 @@ class AssigneeAndStatusExecutor(DefaultExecutor):
         self, payload, bug_obj
     ) -> ActionResult:
         """create jira issue and establish link between bug and issue; rollback/delete if required"""
-        log_context = {
-            "request": payload.dict(),
-            "bug": bug_obj.dict(),
-            "jira": {
-                "project": self.jira_project_key,
-            },
-        }
-        logger.debug(
-            "Create new Jira issue for Bug %s",
-            bug_obj.id,
-            extra={
-                **log_context,
-                "operation": Operation.CREATE,
-            },
+        jira_response_create, log_context = self.create_jira_issue_from_bug(
+            payload, bug_obj
         )
-        comment_list = self.bugzilla_client.get_comments(idlist=[bug_obj.id])
-        description = comment_list["bugs"][str(bug_obj.id)]["comments"][0]["text"][
-            :JIRA_DESCRIPTION_CHAR_LIMIT
-        ]
-
-        fields = {
-            **self.jira_fields(bug_obj),  # type: ignore
-            "issuetype": {"name": bug_obj.issue_type()},
-            "description": description,
-            "project": {"key": self.jira_project_key},
-        }
-
-        jira_response_create = self.jira_client.create_issue(fields=fields)
-
-        # Jira response can be of the form: List or Dictionary
-        if isinstance(jira_response_create, list):
-            # if a list is returned, get the first item
-            jira_response_create = jira_response_create[0]
-
-        if isinstance(jira_response_create, dict):
-            # if a dict is returned or the first item in a list, confirm there are no errors
-            if any(
-                element in ["errors", "errorMessages"] and jira_response_create[element]
-                for element in jira_response_create.keys()
-            ):
-                raise ActionError(f"response contains error: {jira_response_create}")
 
         jira_key_in_response = jira_response_create.get("key")
 

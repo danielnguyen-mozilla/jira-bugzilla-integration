@@ -176,10 +176,7 @@ class DefaultExecutor:
 
         return True, {"jira_responses": [jira_response_update, jira_response_comments]}
 
-    def create_and_link_issue(  # pylint: disable=too-many-locals
-        self, payload, bug_obj
-    ) -> ActionResult:
-        """create jira issue and establish link between bug and issue; rollback/delete if required"""
+    def create_jira_issue_from_bug(self, payload, bug_obj):
         log_context = {
             "request": payload.dict(),
             "bug": bug_obj.dict(),
@@ -206,9 +203,7 @@ class DefaultExecutor:
             "description": description,
             "project": {"key": self.jira_project_key},
         }
-
         jira_response_create = self.jira_client.create_issue(fields=fields)
-
         # Jira response can be of the form: List or Dictionary
         if isinstance(jira_response_create, list):
             # if a list is returned, get the first item
@@ -221,6 +216,16 @@ class DefaultExecutor:
                 for element in jira_response_create.keys()
             ):
                 raise ActionError(f"response contains error: {jira_response_create}")
+
+        return jira_response_create, log_context
+
+    def create_and_link_issue(  # pylint: disable=too-many-locals
+        self, payload, bug_obj
+    ) -> ActionResult:
+        """create jira issue and establish link between bug and issue; rollback/delete if required"""
+        jira_response_create, log_context = self.create_jira_issue_from_bug(
+            payload, bug_obj
+        )
 
         jira_key_in_response = jira_response_create.get("key")
 
