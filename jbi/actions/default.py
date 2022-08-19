@@ -119,6 +119,25 @@ class DefaultExecutor:
 
         return fields
 
+    def append_comments_to_issue(self, comments, jira_issue_key, log_context):
+        jira_response_comments = []
+        for i, comment in enumerate(comments):
+            logger.debug(
+                "Create comment #%s on Jira issue %s",
+                i + 1,
+                jira_issue_key,
+                extra={
+                    **log_context,
+                    "operation": Operation.COMMENT,
+                },
+            )
+            jira_response_comments.append(
+                self.jira_client.issue_add_comment(
+                    issue_key=jira_issue_key, comment=comment
+                )
+            )
+        return jira_response_comments
+
     def bug_create_or_update(
         self, payload: BugzillaWebhookRequest
     ) -> ActionResult:  # pylint: disable=too-many-locals
@@ -150,22 +169,9 @@ class DefaultExecutor:
         )
 
         comments_for_update = payload.map_as_comments()
-        jira_response_comments = []
-        for i, comment in enumerate(comments_for_update):
-            logger.debug(
-                "Create comment #%s on Jira issue %s",
-                i + 1,
-                linked_issue_key,
-                extra={
-                    **log_context,
-                    "operation": Operation.COMMENT,
-                },
-            )
-            jira_response_comments.append(
-                self.jira_client.issue_add_comment(
-                    issue_key=linked_issue_key, comment=comment
-                )
-            )
+        jira_response_comments = self.append_comments_to_issue(
+            comments_for_update, linked_issue_key, log_context
+        )
 
         return True, {"jira_responses": [jira_response_update, jira_response_comments]}
 
