@@ -219,6 +219,39 @@ class DefaultExecutor:
 
         return jira_response_create, log_context
 
+    def link_jira_ticket_to_bugzilla_bug(self, jira_project_key, bug_obj, log_context):
+        jira_url = f"{settings.jira_base_url}browse/{jira_project_key}"
+        logger.debug(
+            "Link %r on Bug %s",
+            jira_url,
+            bug_obj.id,
+            extra={
+                **log_context,
+                "operation": Operation.LINK,
+            },
+        )
+        update = self.bugzilla_client.build_update(see_also_add=jira_url)
+        bugzilla_response = self.bugzilla_client.update_bugs([bug_obj.id], update)
+        return bugzilla_response
+
+    def link_bugzilla_bug_to_jira_ticket(self, bug_obj, jira_project_key, log_context):
+        bugzilla_url = f"{settings.bugzilla_base_url}/show_bug.cgi?id={bug_obj.id}"
+        logger.debug(
+            "Link %r on Jira issue %s",
+            bugzilla_url,
+            jira_project_key,
+            extra={
+                **log_context,
+                "operation": Operation.LINK,
+            },
+        )
+        jira_response = self.jira_client.create_or_update_issue_remote_links(
+            issue_key=jira_project_key,
+            link_url=bugzilla_url,
+            title=f"Bugzilla Bug {bug_obj.id}",
+        )
+        return jira_response
+
     def create_and_link_issue(  # pylint: disable=too-many-locals
         self, payload, bug_obj
     ) -> ActionResult:
@@ -254,33 +287,14 @@ class DefaultExecutor:
             )
             return True, {"jira_response": jira_response_delete}
 
-        jira_url = f"{settings.jira_base_url}browse/{jira_key_in_response}"
-        logger.debug(
-            "Link %r on Bug %s",
-            jira_url,
-            bug_obj.id,
-            extra={
-                **log_context,
-                "operation": Operation.LINK,
-            },
+        bugzilla_response = self.link_jira_ticket_to_bugzilla_bug(
+            jira_key_in_response, bug_obj, log_context
         )
-        update = self.bugzilla_client.build_update(see_also_add=jira_url)
-        bugzilla_response = self.bugzilla_client.update_bugs([bug_obj.id], update)
 
-        bugzilla_url = f"{settings.bugzilla_base_url}/show_bug.cgi?id={bug_obj.id}"
-        logger.debug(
-            "Link %r on Jira issue %s",
-            bugzilla_url,
+        jira_response = self.link_bugzilla_bug_to_jira_ticket(
+            bug_obj,
             jira_key_in_response,
-            extra={
-                **log_context,
-                "operation": Operation.LINK,
-            },
-        )
-        jira_response = self.jira_client.create_or_update_issue_remote_links(
-            issue_key=jira_key_in_response,
-            link_url=bugzilla_url,
-            title=f"Bugzilla Bug {bug_obj.id}",
+            log_context,
         )
 
         return True, {
