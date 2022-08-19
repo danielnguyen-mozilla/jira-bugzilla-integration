@@ -33,15 +33,6 @@ class AssigneeAndStatusExecutor(DefaultExecutor):
         super().__init__(**kwargs)
         self.status_map = status_map
 
-    def jira_comments_for_update(
-        self,
-        payload: BugzillaWebhookRequest,
-    ):
-        """Returns the comments to post to Jira for a changed bug"""
-        return payload.map_as_comments(
-            status_log_enabled=False, assignee_log_enabled=False
-        )
-
     def create_and_link_issue(  # pylint: disable=too-many-locals
         self, payload, bug_obj
     ) -> ActionResult:
@@ -124,9 +115,11 @@ class AssigneeAndStatusExecutor(DefaultExecutor):
             key=linked_issue_key, fields=self.jira_fields(bug_obj)
         )
 
-        comments = self.jira_comments_for_update(payload)
+        comments_for_update = payload.map_as_comments(
+            status_log_enabled=False, assignee_log_enabled=False
+        )
         jira_response_comments = []
-        for i, comment in enumerate(comments):
+        for i, comment in enumerate(comments_for_update):
             logger.debug(
                 "Create comment #%s on Jira issue %s",
                 i + 1,

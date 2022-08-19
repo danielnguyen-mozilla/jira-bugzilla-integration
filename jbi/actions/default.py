@@ -119,13 +119,6 @@ class DefaultExecutor:
 
         return fields
 
-    def jira_comments_for_update(
-        self,
-        payload: BugzillaWebhookRequest,
-    ):
-        """Returns the comments to post to Jira for a changed bug"""
-        return payload.map_as_comments()
-
     def bug_create_or_update(
         self, payload: BugzillaWebhookRequest
     ) -> ActionResult:  # pylint: disable=too-many-locals
@@ -156,9 +149,9 @@ class DefaultExecutor:
             key=linked_issue_key, fields=self.jira_fields(bug_obj)
         )
 
-        comments = self.jira_comments_for_update(payload)
+        comments_for_update = payload.map_as_comments()
         jira_response_comments = []
-        for i, comment in enumerate(comments):
+        for i, comment in enumerate(comments_for_update):
             logger.debug(
                 "Create comment #%s on Jira issue %s",
                 i + 1,
