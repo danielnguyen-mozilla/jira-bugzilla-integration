@@ -37,7 +37,7 @@ def test_default_returns_callable_with_data(
     handled, details = callable_object(payload=webhook_create_example)
 
     assert handled
-    assert details["jira_response"] == sentinel
+    assert details["jira_link_bug_response"] == sentinel
 
 
 def test_created_public(

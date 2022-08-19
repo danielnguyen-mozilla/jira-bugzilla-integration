@@ -10,9 +10,8 @@ Extended action that provides some additional features over the default:
 import logging
 
 from jbi import ActionResult, Operation
-from jbi.actions.default import JIRA_DESCRIPTION_CHAR_LIMIT, DefaultExecutor
+from jbi.actions.default import DefaultExecutor
 from jbi.environment import get_settings
-from jbi.errors import ActionError
 from jbi.models import BugzillaBug, BugzillaWebhookRequest
 
 logger = logging.getLogger(__name__)
@@ -33,100 +32,40 @@ class AssigneeAndStatusExecutor(DefaultExecutor):
         super().__init__(**kwargs)
         self.status_map = status_map
 
-    def create_and_link_issue(  # pylint: disable=too-many-locals
-        self, payload, bug_obj
-    ) -> ActionResult:
-        """create jira issue and establish link between bug and issue; rollback/delete if required"""
-        jira_response_create, log_context = self.create_jira_issue_from_bug(
-            payload, bug_obj
-        )
-
-        jira_key_in_response = jira_response_create.get("key")
-
-        log_context["jira"]["issue"] = jira_key_in_response
-
-        # In the time taken to create the Jira issue the bug may have been updated so
-        # re-retrieve it to ensure we have the latest data.
-        bug_obj = payload.getbug_as_bugzilla_object()
-        jira_key_in_bugzilla = bug_obj.extract_from_see_also()
-        _duplicate_creation_event = (
-            jira_key_in_bugzilla is not None
-            and jira_key_in_response != jira_key_in_bugzilla
-        )
-        if _duplicate_creation_event:
-            logger.warning(
-                "Delete duplicated Jira issue %s from Bug %s",
-                jira_key_in_response,
-                bug_obj.id,
-                extra={
-                    **log_context,
-                    "operation": Operation.DELETE,
-                },
-            )
-            jira_response_delete = self.jira_client.delete_issue(
-                issue_id_or_key=jira_key_in_response
-            )
-            return True, {"jira_response": jira_response_delete}
-
-        bugzilla_response = self.link_jira_ticket_to_bugzilla_bug(
-            jira_key_in_response, bug_obj, log_context
-        )
-
-        jira_response = self.link_bugzilla_bug_to_jira_ticket(
-            bug_obj,
-            jira_key_in_response,
-            log_context,
-        )
-
-        self.update_issue(payload, bug_obj, jira_key_in_response, is_new=True)
-
-        return True, {
-            "bugzilla_response": bugzilla_response,
-            "jira_response": jira_response,
-        }
-
-    def bug_create_or_update(
-        self, payload: BugzillaWebhookRequest
-    ) -> ActionResult:  # pylint: disable=too-many-locals
-        """Create and link jira issue with bug, or update; rollback if multiple events fire"""
-        bug_obj = payload.bugzilla_object
-        linked_issue_key = bug_obj.extract_from_see_also()  # type: ignore
-        if not linked_issue_key:
-            return self.create_and_link_issue(payload, bug_obj)
-
-        log_context = {
-            "request": payload.dict(),
-            "bug": bug_obj.dict(),
-            "jira": {
-                "issue": linked_issue_key,
-                "project": self.jira_project_key,
-            },
-        }
+    def __call__(self, payload: BugzillaWebhookRequest) -> ActionResult:
+        target = payload.event.target  # type: ignore
+        if target == "comment":
+            return self.comment_create_or_noop(payload=payload)
+        if target == "bug":
+            bug_obj = payload.bugzilla_object
+            linked_issue_key = bug_obj.extract_from_see_also()
+            if linked_issue_key:
+                action_result = self.update_issue(payload=payload, bug_obj=bug_obj)
+                self.update_issue_assignee_and_status(
+                    payload, bug_obj, linked_issue_key, is_new=False
+                )
+                return action_result
+            else:
+                action_result = self.create_and_link_issue(
+                    payload=payload, bug_obj=bug_obj
+                )
+                _, context = action_result
+                project_key = context["jira_create_issue_response"]["key"]
+                self.update_issue_assignee_and_status(
+                    payload, bug_obj, project_key, is_new=True
+                )
+                return action_result
         logger.debug(
-            "Update fields of Jira issue %s for Bug %s",
-            linked_issue_key,
-            bug_obj.id,
+            "Ignore event target %r",
+            target,
             extra={
-                **log_context,
-                "operation": Operation.LINK,
+                "request": payload.dict(),
+                "operation": Operation.IGNORE,
             },
         )
-        jira_response_update = self.jira_client.update_issue_field(
-            key=linked_issue_key, fields=self.jira_fields(bug_obj)
-        )
+        return False, {}
 
-        comments_for_update = payload.map_as_comments(
-            status_log_enabled=False, assignee_log_enabled=False
-        )
-        jira_response_comments = self.append_comments_to_issue(
-            comments_for_update, linked_issue_key, log_context
-        )
-
-        self.update_issue(payload, bug_obj, linked_issue_key, is_new=False)
-
-        return True, {"jira_responses": [jira_response_update, jira_response_comments]}
-
-    def update_issue(
+    def update_issue_assignee_and_status(
         self,
         payload: BugzillaWebhookRequest,
         bug_obj: BugzillaBug,

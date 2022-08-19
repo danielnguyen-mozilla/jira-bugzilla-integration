@@ -54,9 +54,14 @@ class DefaultExecutor:
         """Called from BZ webhook when default action is used. All default-action webhook-events are processed here."""
         target = payload.event.target  # type: ignore
         if target == "comment":
-            return self.comment_create_or_noop(payload=payload)  # type: ignore
+            return self.comment_create_or_noop(payload=payload)
         if target == "bug":
-            return self.bug_create_or_update(payload=payload)
+            bug_obj = payload.bugzilla_object
+            linked_issue_key = bug_obj.extract_from_see_also()
+            if not linked_issue_key:
+                return self.create_and_link_issue(payload=payload, bug_obj=bug_obj)
+            else:
+                return self.update_issue(payload=payload, bug_obj=bug_obj)
         logger.debug(
             "Ignore event target %r",
             target,
@@ -138,15 +143,9 @@ class DefaultExecutor:
             )
         return jira_response_comments
 
-    def bug_create_or_update(
-        self, payload: BugzillaWebhookRequest
-    ) -> ActionResult:  # pylint: disable=too-many-locals
-        """Create and link jira issue with bug, or update; rollback if multiple events fire"""
-        bug_obj = payload.bugzilla_object
+    def update_issue(self, payload: BugzillaWebhookRequest, bug_obj) -> ActionResult:
+        """Update Jira issue with webhook payload data"""
         linked_issue_key = bug_obj.extract_from_see_also()  # type: ignore
-        if not linked_issue_key:
-            return self.create_and_link_issue(payload, bug_obj)
-
         log_context = {
             "request": payload.dict(),
             "bug": bug_obj.dict(),
@@ -161,7 +160,7 @@ class DefaultExecutor:
             bug_obj.id,
             extra={
                 **log_context,
-                "operation": Operation.LINK,
+                "operation": Operation.UPDATE,
             },
         )
         jira_response_update = self.jira_client.update_issue_field(
@@ -251,10 +250,11 @@ class DefaultExecutor:
         )
         return jira_response
 
-    def create_and_link_issue(  # pylint: disable=too-many-locals
-        self, payload, bug_obj
+    def create_and_link_issue(
+        self, payload: BugzillaWebhookRequest, bug_obj: BugzillaBug
     ) -> ActionResult:
         """create jira issue and establish link between bug and issue; rollback/delete if required"""
+        bug_obj = payload.bugzilla_object
         jira_response_create, log_context = self.create_jira_issue_from_bug(
             payload, bug_obj
         )
@@ -286,17 +286,18 @@ class DefaultExecutor:
             )
             return True, {"jira_response": jira_response_delete}
 
-        bugzilla_response = self.link_jira_ticket_to_bugzilla_bug(
+        bugzilla_link_issue_response = self.link_jira_ticket_to_bugzilla_bug(
             jira_key_in_response, bug_obj, log_context
         )
 
-        jira_response = self.link_bugzilla_bug_to_jira_ticket(
+        jira_link_bug_response = self.link_bugzilla_bug_to_jira_ticket(
             bug_obj,
             jira_key_in_response,
             log_context,
         )
 
         return True, {
-            "bugzilla_response": bugzilla_response,
-            "jira_response": jira_response,
+            "bugzilla_link_issue_response": bugzilla_link_issue_response,
+            "jira_link_bug_response": jira_link_bug_response,
+            "jira_create_issue_response": jira_response_create,
         }
