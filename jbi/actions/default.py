@@ -126,15 +126,6 @@ class DefaultExecutor:
         """Returns the comments to post to Jira for a changed bug"""
         return payload.map_as_comments()
 
-    def update_issue(
-        self,
-        payload: BugzillaWebhookRequest,
-        bug_obj: BugzillaBug,
-        linked_issue_key: str,
-        is_new: bool,
-    ):
-        """Allows sub-classes to modify the Jira issue in response to a bug event"""
-
     def bug_create_or_update(
         self, payload: BugzillaWebhookRequest
     ) -> ActionResult:  # pylint: disable=too-many-locals
@@ -182,8 +173,6 @@ class DefaultExecutor:
                     issue_key=linked_issue_key, comment=comment
                 )
             )
-
-        self.update_issue(payload, bug_obj, linked_issue_key, is_new=False)
 
         return True, {"jira_responses": [jira_response_update, jira_response_comments]}
 
@@ -288,8 +277,6 @@ class DefaultExecutor:
             link_url=bugzilla_url,
             title=f"Bugzilla Bug {bug_obj.id}",
         )
-
-        self.update_issue(payload, bug_obj, jira_key_in_response, is_new=True)
 
         return True, {
             "bugzilla_response": bugzilla_response,
